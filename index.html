@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Arcane Survivors</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div id="game-container">
+        <!-- Game rendering canvas -->
+        <canvas id="game-canvas"></canvas>
+
+        <!-- UI overlay (HUD) -->
+        <div id="hud">
+            <div class="top-bar">
+                <div class="bar-container">
+                    <div id="xp-fill" class="bar-fill"></div>
+                    <div class="bar-text">LVL <span id="ui-level">1</span></div>
+                </div>
+                <div class="bar-container" style="height: 18px;">
+                    <div id="hp-fill" class="bar-fill"></div>
+                    <div class="bar-text" style="font-size:12px;">HP</div>
+                </div>
+            </div>
+
+            <div class="stats-panel">
+                <div class="stat-item">TIME <span id="ui-time" class="stat-value">00:00</span></div>
+                <div class="stat-item">KILLS <span id="ui-kills" class="stat-value">0</span></div>
+                <div class="stat-item" style="font-size:12px; color:#94a3b8; margin-top:15px;">FPS <span id="ui-fps" class="stat-value">60</span></div>
+            </div>
+        </div>
+
+        <!-- Main Menu Overlay -->
+        <div id="start-screen" class="overlay active">
+            <h1>Arcane Survivors</h1>
+            <p style="margin-bottom: 40px; font-size: 1.2rem; color: #cbd5e1; max-width: 500px; text-align: center; line-height: 1.6;">
+                Use <b>WASD</b> or <b>Arrow Keys</b> to move.<br>
+                Attacks are automatic. Survive as long as you can!<br>
+                Collect gems to level up and gain power.
+            </p>
+            <button class="btn" id="btn-start">Start Game</button>
+        </div>
+
+        <!-- Level Up / Upgrade Overlay -->
+        <div id="upgrade-screen" class="overlay">
+            <h2>LEVEL UP!</h2>
+            <p style="color: #cbd5e1; font-size: 1.2rem;">Choose your upgrade:</p>
+            <div id="cards-container" class="cards-container">
+                <!-- Cards injected by JS -->
+            </div>
+        </div>
+
+        <!-- Game Over Overlay -->
+        <div id="death-screen" class="overlay">
+            <h1 style="color: #ef4444; background: none; -webkit-text-fill-color: #ef4444; filter: drop-shadow(0 0 15px rgba(239, 68, 68, 0.5));">YOU DIED</h1>
+            <p id="death-stats" style="margin-bottom: 40px; font-size: 1.5rem; color: #cbd5e1; text-align: center; line-height: 1.6;">
+                Survived: 00:00<br>
+                Kills: 0<br>
+                Level: 1
+            </p>
+            <button class="btn" id="btn-restart">Try Again</button>
+        </div>
+    </div>
+
+    <!-- Engine Scripts (loaded in dependency order) -->
+    <script src="utils.js"></script>
+    <script src="entities.js"></script>
+    <script src="weapons.js"></script>
+    <script src="enemies.js"></script>
+    <script src="upgrades.js"></script>
+    <script src="main.js"></script>
+
+</body>
+</html>
