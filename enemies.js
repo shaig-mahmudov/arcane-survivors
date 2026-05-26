@@ -76,21 +76,33 @@ class Enemy extends Ents.Entity {
         // Separation (boids-like) to prevent stacking
         this.sepX = 0;
         this.sepY = 0;
+
+        // Status Effects
+        this.chilledTimer = 0;
+        this.frozenTimer = 0;
     }
 
     takeDamage(amount, isCrit, game) {
         if (this.dead) return;
-        this.hp -= amount;
+
+        // Deep Freeze passive damage amplification (25% extra damage per level to frozen/chilled enemies)
+        let actualAmount = amount;
+        if ((this.chilledTimer > 0 || this.frozenTimer > 0) && game.player.passives && game.player.passives['deepFreeze']) {
+            actualAmount = Math.round(amount * (1.0 + game.player.passives['deepFreeze'] * 0.25));
+        }
+
+        this.hp -= actualAmount;
         this.flashTimer = 0.1;
 
-        // Apply a small knockback
+        // Apply a small knockback (frozen enemies resist knockback slightly)
         if (this.def.type !== 'elite') { // Elites resist knockback
             const dirX = this.x - game.player.x;
             const dirY = this.y - game.player.y;
             const d = Math.max(1, Math.sqrt(dirX * dirX + dirY * dirY));
             const force = isCrit ? 150 : 80;
-            this.kbX += (dirX / d) * force;
-            this.kbY += (dirY / d) * force;
+            const kbMult = this.frozenTimer > 0 ? 0.3 : 1.0;
+            this.kbX += (dirX / d) * force * kbMult;
+            this.kbY += (dirY / d) * force * kbMult;
         }
 
         if (this.hp <= 0) {
@@ -119,9 +131,55 @@ class Enemy extends Ents.Entity {
             game.gems.push(new Ents.HealOrb(this.x, this.y, 10));
         }
 
+        // Ice Shatter explosion!
+        if (this.chilledTimer > 0 || this.frozenTimer > 0) {
+            // Ice burst particles
+            game.particles.emit({
+                x: this.x, y: this.y - 20, count: 12,
+                color: '#67e8f9', color2: '#3b82f6',
+                speed: 100, size: 4, lifetime: 0.5, glow: true
+            });
+            game.audio.lightning(); // Use lightning sound for shatter crackle!
+
+            // Spawn flying ice shards
+            const shardSpeed = 260;
+            const shardDamage = Math.round(10 * (game.player.stats.damage || 1.0));
+            
+            // Check if player has active FrostNova weapon level to increase shard count
+            const frostNovaWep = game.player.weapons.find(w => w.name === 'Frost Nova');
+            const count = frostNovaWep ? (frostNovaWep.level >= 7 ? 6 : 4) : 4;
+            
+            for (let i = 0; i < count; i++) {
+                const angle = (i / count) * Math.PI * 2;
+                game.projectiles.push(new window.GameWeapons.Projectile({
+                    x: this.x,
+                    y: this.y,
+                    vx: Math.cos(angle) * shardSpeed,
+                    vy: Math.sin(angle) * shardSpeed,
+                    radius: 5,
+                    damage: shardDamage,
+                    isCrit: false,
+                    color: '#67e8f9',
+                    glowColor: '#3b82f6',
+                    piercing: 1, // pierces 1 enemy
+                    lifetime: 1.0,
+                    drawYOffset: -20,
+                    onHit: (enemy, g) => {
+                        // Apply brief chill to anything hit by shatter shards!
+                        enemy.chilledTimer = Math.max(enemy.chilledTimer, 2.0);
+                        g.particles.emit({
+                            x: enemy.x, y: enemy.y - 20,
+                            count: 3, color: '#67e8f9', color2: '#3b82f6',
+                            speed: 40, size: 2, lifetime: 0.25
+                        });
+                    }
+                }));
+            }
+        }
+
         // Death particles
         game.particles.emit({
-            x: this.x, y: this.y, count: 6,
+            x: this.x, y: this.y - 20, count: 6,
             color: this.color, color2: '#000',
             speed: 50, size: this.radius * 0.3, lifetime: 0.4
         });
@@ -129,6 +187,10 @@ class Enemy extends Ents.Entity {
 
     update(dt, player) {
         if (this.flashTimer > 0) this.flashTimer -= dt;
+
+        // Decay status effects
+        if (this.chilledTimer > 0) this.chilledTimer -= dt;
+        if (this.frozenTimer > 0) this.frozenTimer -= dt;
 
         // Decay knockback
         this.kbX *= 0.85;
@@ -141,24 +203,38 @@ class Enemy extends Ents.Entity {
 
         let vx = 0, vy = 0;
         if (d > 0) {
-            vx = (dx / d) * this.speed;
-            vy = (dy / d) * this.speed;
-            this.facingAngle = Math.atan2(dy, dx);
+            // Apply speed modifications based on status effects
+            let currentSpeed = this.speed;
+            if (this.frozenTimer > 0) {
+                currentSpeed = 0; // Frozen solid
+            } else if (this.chilledTimer > 0) {
+                currentSpeed *= 0.6; // 40% slow
+            }
+
+            vx = (dx / d) * currentSpeed;
+            vy = (dy / d) * currentSpeed;
+            
+            // Only update facing angle and walk cycle if not frozen
+            if (this.frozenTimer <= 0) {
+                this.facingAngle = Math.atan2(dy, dx);
+                this.walkTimer += dt * 10 * (currentSpeed / 60);
+            }
         }
 
-        // Add separation from spatial grid (calculated in main loop)
-        vx += this.sepX * 50;
-        vy += this.sepY * 50;
+        // Add separation from spatial grid (calculated in main loop) - only if not frozen
+        if (this.frozenTimer <= 0) {
+            vx += this.sepX * 50;
+            vy += this.sepY * 50;
+        }
 
         // Reset separation for next frame
         this.sepX = 0;
         this.sepY = 0;
 
-        // Final velocity application
-        this.x += (vx + this.kbX) * dt;
-        this.y += (vy + this.kbY) * dt;
-
-        this.walkTimer += dt * 10 * (this.speed / 60);
+        // Final velocity application (frozen enemies resist knockback movement slightly)
+        const kbMult = this.frozenTimer > 0 ? 0.3 : 1.0;
+        this.x += (vx + this.kbX * kbMult) * dt;
+        this.y += (vy + this.kbY * kbMult) * dt;
 
         // Check collision with player
         if (d < this.radius + player.radius) {
@@ -214,6 +290,10 @@ class Enemy extends Ents.Entity {
             
             if (isFlashing) {
                 ctx.filter = 'brightness(200%) drop-shadow(0 0 10px white)';
+            } else if (this.frozenTimer > 0) {
+                ctx.filter = 'hue-rotate(180deg) saturate(1.8) brightness(1.2) drop-shadow(0 0 8px #67e8f9)';
+            } else if (this.chilledTimer > 0) {
+                ctx.filter = 'hue-rotate(180deg) saturate(1.3) brightness(1.1)';
             }
             
             // Anchor at feet (with 1.55 * radius offset) and apply bobbing to the height
@@ -224,7 +304,7 @@ class Enemy extends Ents.Entity {
                 -drawWidth / 2, -drawHeight + (radius * 1.55) - bob, drawWidth, drawHeight
             );
             
-            if (isFlashing) ctx.filter = 'none';
+            if (isFlashing || this.frozenTimer > 0 || this.chilledTimer > 0) ctx.filter = 'none';
 
         } else {
             
@@ -240,6 +320,16 @@ class Enemy extends Ents.Entity {
                 ctx.fillStyle = '#fff';
                 ctx.shadowBlur = 10;
                 ctx.shadowColor = '#fff';
+            } else if (this.frozenTimer > 0) {
+                ctx.fillStyle = '#e0f2fe';
+                ctx.shadowBlur = 14;
+                ctx.shadowColor = '#06b6d4';
+            } else if (this.chilledTimer > 0) {
+                const grd = ctx.createRadialGradient(-radius * 0.3, -radius * 0.3, 0, 0, 0, radius);
+                grd.addColorStop(0, '#e0f2fe');
+                grd.addColorStop(0.3, '#38bdf8');
+                grd.addColorStop(1, '#0f172a');
+                ctx.fillStyle = grd;
             } else {
                 const grd = ctx.createRadialGradient(-radius * 0.3, -radius * 0.3, 0, 0, 0, radius);
                 grd.addColorStop(0, '#fff');
@@ -250,12 +340,12 @@ class Enemy extends Ents.Entity {
             ctx.fill();
 
             // Eyes
-            ctx.fillStyle = isFlashing ? '#000' : '#fff';
+            ctx.fillStyle = (isFlashing || this.frozenTimer > 0) ? '#000' : '#fff';
             ctx.beginPath();
             ctx.arc(radius * 0.4, -radius * 0.3, radius * 0.15, 0, Math.PI * 2);
             ctx.arc(radius * 0.4,  radius * 0.3, radius * 0.15, 0, Math.PI * 2);
             ctx.fill();
-            ctx.fillStyle = isFlashing ? '#fff' : '#ef4444';
+            ctx.fillStyle = (isFlashing || this.frozenTimer > 0) ? '#fff' : '#ef4444';
             ctx.beginPath();
             ctx.arc(radius * 0.5, -radius * 0.3, radius * 0.05, 0, Math.PI * 2);
             ctx.arc(radius * 0.5,  radius * 0.3, radius * 0.05, 0, Math.PI * 2);

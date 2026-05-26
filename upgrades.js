@@ -86,6 +86,14 @@ const PASSIVE_UPGRADES = [
         desc: 'Heal 50 HP immediately',
         maxLevel: 9999, // Can be picked infinitely
         apply: (player) => player.heal(50)
+    },
+    {
+        id: 'deepFreeze',
+        name: 'Deep Freeze',
+        icon: '❄️',
+        desc: 'Damage to Frozen/Chilled enemies +25% per level',
+        maxLevel: 5,
+        apply: (player) => { /* Damage multiplier logic is handled dynamically in Enemy.takeDamage */ }
     }
 ];
 

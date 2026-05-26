@@ -660,10 +660,125 @@ class LightningStrike extends Weapon {
     }
 }
 
+// ─── 6. Frost Nova ───────────────────────────────────────────────────────────
+
+/**
+ * Emits expanding waves of frost, slowing and freezing enemies.
+ * Frozen/Chilled enemies explode into flying ice shards upon death.
+ */
+class FrostNova extends Weapon {
+    constructor(game) {
+        super(game, 'Frost Nova', '❄️');
+        this.maxLevel = 8;
+    }
+
+    get cooldown() {
+        let base = 3.5;
+        if (this.level >= 3) base -= 0.5;
+        if (this.level >= 6) base -= 0.5;
+        return Math.max(1.0, base);
+    }
+
+    get _radius() {
+        let r = 110;
+        if (this.level >= 2) r += 20;
+        if (this.level >= 5) r += 30;
+        return r;
+    }
+
+    get _baseDamage() {
+        let dmg = 15;
+        if (this.level >= 2) dmg += 5;
+        if (this.level >= 5) dmg += 10;
+        if (this.level >= 8) dmg += 10;
+        return dmg;
+    }
+
+    get _chillDuration() {
+        return this.level >= 3 ? 4.0 : 3.0;
+    }
+
+    get _freezeDuration() {
+        if (this.level >= 8) return 2.0;
+        if (this.level >= 4) return 1.0;
+        return 0;
+    }
+
+    fire(player) {
+        const rad = this._radius * player.stats.areaBonus;
+        const dmgBase = this._baseDamage;
+        const chillDur = this._chillDuration;
+        const freezeDur = this._freezeDuration;
+
+        // Expanding Frost Nova ring particles
+        const steps = 32 + this.level * 4;
+        for (let i = 0; i < steps; i++) {
+            const angle = (i / steps) * Math.PI * 2;
+            const speed = rad * 1.8; // Expand to maximum radius in ~0.5s
+            this.game.particles.emit({
+                x: player.x, y: player.y - 10,
+                count: 1, color: '#e0f2fe', color2: '#38bdf8',
+                speed: speed, speedVariance: speed * 0.15,
+                size: 4, sizeVariance: 1.5,
+                lifetime: 0.45, glow: true,
+                angle: angle, spread: 0.1
+            });
+        }
+
+        // Frost flash/vapor particles
+        this.game.particles.emit({
+            x: player.x, y: player.y - 15,
+            count: 15, color: '#93c5fd', color2: '#1d4ed8',
+            speed: 60, speedVariance: 30,
+            size: 5, sizeVariance: 2,
+            lifetime: 0.5, glow: true
+        });
+
+        // Impact sound
+        this.game.screenShake.trigger(3, 0.15);
+        this.game.audio.lightning(); // Crackle sound
+
+        // Query all enemies within radius
+        const targets = this._enemiesInRadius(player.x, player.y, rad);
+        for (const enemy of targets) {
+            // Apply freeze / chill status
+            if (freezeDur > 0) {
+                enemy.frozenTimer = Math.max(enemy.frozenTimer, freezeDur);
+            }
+            enemy.chilledTimer = Math.max(enemy.chilledTimer, chillDur);
+
+            // Double damage at Level 8!
+            const finalBaseDmg = (this.level >= 8) ? dmgBase * 2 : dmgBase;
+            const { dmg, isCrit } = player.calcDamage(finalBaseDmg);
+            enemy.takeDamage(dmg, isCrit, this.game);
+            this.game.floatingText.spawn(enemy.x, enemy.y - 30, dmg, isCrit);
+
+            // Hit frost sparkles on enemies
+            this.game.particles.emit({
+                x: enemy.x, y: enemy.y - 20,
+                count: 5, color: '#67e8f9', color2: '#2563eb',
+                speed: 50, size: 2.5, lifetime: 0.3, glow: true
+            });
+        }
+    }
+
+    getLevelDesc() {
+        if (this.level === 1) return "Emits expanding ice waves that slow enemies.";
+        if (this.level === 2) return `Lv2 — Area +20px, Damage +5`;
+        if (this.level === 3) return `Lv3 — Cooldown -0.5s, Slow duration +1s`;
+        if (this.level === 4) return `Lv4 — FREEZES enemies solid for 1s!`;
+        if (this.level === 5) return `Lv5 — Area +30px, Damage +10`;
+        if (this.level === 6) return `Lv6 — Cooldown -0.5s`;
+        if (this.level === 7) return `Lv7 — Shatter ejects +2 shards on enemy death`;
+        if (this.level === 8) return `Lv8 — Freezes for 2s and deals DOUBLE damage!`;
+        return `Lv${this.level}`;
+    }
+}
+
 // ─── Weapon Registry ─────────────────────────────────────────────────────────
 
 /** All available weapon classes, used by the upgrade system. */
-const WEAPON_CLASSES = [MagicWand, OrbitWeapon, AreaExplosion, KnifeThrow, LightningStrike];
+const WEAPON_CLASSES = [MagicWand, OrbitWeapon, AreaExplosion, KnifeThrow, LightningStrike, FrostNova];
 
 const WEAPON_DESCRIPTIONS = {
     MagicWand:      'Fires homing magic bolts at nearest enemies.',
@@ -671,6 +786,7 @@ const WEAPON_DESCRIPTIONS = {
     AreaExplosion:  'Triggers explosions near enemy clusters.',
     KnifeThrow:     'Rapid-fires piercing knives toward enemies.',
     LightningStrike:'Calls chain lightning that jumps between foes.',
+    FrostNova:      'Emits expanding ice waves that freeze and shatter foes.',
 };
 
 // ─── Exports ─────────────────────────────────────────────────────────────────
@@ -683,6 +799,7 @@ window.GameWeapons = {
     AreaExplosion,
     KnifeThrow,
     LightningStrike,
+    FrostNova,
     WEAPON_CLASSES,
     WEAPON_DESCRIPTIONS,
 };
