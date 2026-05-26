@@ -775,10 +775,111 @@ class FrostNova extends Weapon {
     }
 }
 
+// Fire weapon: exploding fireballs that apply burn damage over time.
+class FlameBurst extends Weapon {
+    constructor(game) {
+        super(game, 'Flame Burst', '🔥');
+        this.maxLevel = 8;
+    }
+
+    get cooldown() { return Math.max(0.55, 1.8 - (this.level - 1) * 0.12); }
+    get _baseDamage() { return 16 + (this.level - 1) * 5; }
+    get _burnDps() { return 8 + (this.level - 1) * 3; }
+    get _burnDuration() { return 2.5 + Math.floor((this.level - 1) / 3) * 0.5; }
+    get _splashRadius() { return 45 + (this.level - 1) * 5; }
+    get _projectileCount() { return 1 + Math.floor((this.level - 1) / 3); }
+
+    fire(player) {
+        player.attackTimer = 0.4;
+
+        const target = this._nearestEnemy(player.x, player.y, 650);
+        const speed = 300 * player.stats.projectileSpd;
+        const baseAngle = target
+            ? angleTo(player.x, player.y, target.x, target.y)
+            : player.facingAngle;
+
+        player.facingAngle = baseAngle;
+
+        const count = this._projectileCount;
+        const spreadAngle = count > 1 ? (count - 1) * 0.22 : 0;
+        const groundTipX = player.x + Math.cos(baseAngle) * 32;
+        const groundTipY = player.y + Math.sin(baseAngle) * 32;
+
+        for (let i = 0; i < count; i++) {
+            const angle = baseAngle + (i - (count - 1) / 2) * (spreadAngle / Math.max(1, count - 1));
+            const { dmg, isCrit } = player.calcDamage(this._baseDamage);
+
+            this._spawnProjectile({
+                x: groundTipX,
+                y: groundTipY,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                radius: 8 + (this.level >= 5 ? 2 : 0),
+                damage: dmg,
+                isCrit,
+                color: '#fb923c',
+                glowColor: '#dc2626',
+                piercing: 0,
+                lifetime: 1.5,
+                drawYOffset: -52,
+                onHit: (enemy, g) => {
+                    g.floatingText.spawn(enemy.x, enemy.y - 30, dmg, isCrit);
+                    this._explode(enemy.x, enemy.y, enemy, player);
+                }
+            });
+        }
+
+        this.game.audio.projectileFire();
+    }
+
+    _explode(x, y, primary, player) {
+        const radius = this._splashRadius * player.stats.areaBonus;
+        const kindling = player.passives?.kindling || 0;
+        const burnDps = this._burnDps * (1 + kindling * 0.25);
+        const burnDuration = this._burnDuration + kindling * 0.25;
+
+        this.game.particles.emit({
+            x, y: y - 20,
+            count: 16 + this.level * 2,
+            color: '#fed7aa', color2: '#ef4444',
+            speed: 95, speedVariance: 35,
+            size: 4, sizeVariance: 2,
+            lifetime: 0.35, glow: true
+        });
+
+        const targets = this._enemiesInRadius(x, y, radius);
+        for (const enemy of targets) {
+            if (enemy.dead) continue;
+
+            enemy.applyBurn(burnDps, burnDuration);
+
+            if (enemy !== primary) {
+                const { dmg, isCrit } = player.calcDamage(this._baseDamage * 0.45);
+                enemy.takeDamage(dmg, isCrit, this.game);
+                this.game.floatingText.spawn(enemy.x, enemy.y - 30, dmg, isCrit);
+            }
+
+            this.game.particles.emit({
+                x: enemy.x, y: enemy.y - 18,
+                count: 4, color: '#fb923c', color2: '#991b1b',
+                speed: 45, size: 2.5, lifetime: 0.28, glow: true,
+                gravity: -30
+            });
+        }
+
+        this.game.screenShake.trigger(2, 0.08);
+    }
+
+    getLevelDesc() {
+        if (this.level === 1) return 'Launches fireballs that burn enemies.';
+        return `Lv${this.level} - ${this._projectileCount} fireballs, ${this._baseDamage} dmg, ${Math.round(this._burnDps)} burn/s`;
+    }
+}
+
 // ─── Weapon Registry ─────────────────────────────────────────────────────────
 
 /** All available weapon classes, used by the upgrade system. */
-const WEAPON_CLASSES = [MagicWand, OrbitWeapon, AreaExplosion, KnifeThrow, LightningStrike, FrostNova];
+const WEAPON_CLASSES = [MagicWand, OrbitWeapon, AreaExplosion, KnifeThrow, LightningStrike, FrostNova, FlameBurst];
 
 const WEAPON_DESCRIPTIONS = {
     MagicWand:      'Fires homing magic bolts at nearest enemies.',
@@ -787,6 +888,7 @@ const WEAPON_DESCRIPTIONS = {
     KnifeThrow:     'Rapid-fires piercing knives toward enemies.',
     LightningStrike:'Calls chain lightning that jumps between foes.',
     FrostNova:      'Emits expanding ice waves that freeze and shatter foes.',
+    FlameBurst:     'Launches exploding fireballs that ignite enemies.',
 };
 
 // ─── Exports ─────────────────────────────────────────────────────────────────
@@ -800,9 +902,9 @@ window.GameWeapons = {
     KnifeThrow,
     LightningStrike,
     FrostNova,
+    FlameBurst,
     WEAPON_CLASSES,
     WEAPON_DESCRIPTIONS,
 };
 
 })();
-

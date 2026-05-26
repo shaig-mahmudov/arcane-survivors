@@ -80,6 +80,15 @@ class Enemy extends Ents.Entity {
         // Status Effects
         this.chilledTimer = 0;
         this.frozenTimer = 0;
+        this.burningTimer = 0;
+        this.burnDps = 0;
+        this.burnTickTimer = 0;
+    }
+
+    applyBurn(dps, duration) {
+        this.burningTimer = Math.max(this.burningTimer, duration);
+        this.burnDps = Math.max(this.burnDps, dps);
+        if (this.burnTickTimer <= 0) this.burnTickTimer = 0.5;
     }
 
     takeDamage(amount, isCrit, game) {
@@ -177,6 +186,30 @@ class Enemy extends Ents.Entity {
             }
         }
 
+        // Wildfire passive: burning enemies burst and spread flames on death.
+        const wildfireLevel = game.player.passives?.wildfire || 0;
+        if (this.burningTimer > 0 && wildfireLevel > 0) {
+            const radius = 70 + wildfireLevel * 15;
+            const burnDps = 6 + wildfireLevel * 4;
+            const burstDamage = Math.round((10 + wildfireLevel * 6) * game.player.stats.damage);
+
+            game.particles.emit({
+                x: this.x, y: this.y - 20,
+                count: 18 + wildfireLevel * 4,
+                color: '#fed7aa', color2: '#dc2626',
+                speed: 110, size: 4, lifetime: 0.35, glow: true
+            });
+
+            for (const enemy of game.grid.query(this.x, this.y, radius)) {
+                if (enemy.dead || enemy === this) continue;
+                if (distSq(this.x, this.y, enemy.x, enemy.y) > radius * radius) continue;
+
+                enemy.applyBurn(burnDps, 2.0 + wildfireLevel * 0.35);
+                enemy.takeDamage(burstDamage, false, game);
+                game.floatingText.spawn(enemy.x, enemy.y - 30, burstDamage, false);
+            }
+        }
+
         // Death particles
         game.particles.emit({
             x: this.x, y: this.y - 20, count: 6,
@@ -186,11 +219,42 @@ class Enemy extends Ents.Entity {
     }
 
     update(dt, player) {
+        if (this.dead) return;
+
         if (this.flashTimer > 0) this.flashTimer -= dt;
 
         // Decay status effects
         if (this.chilledTimer > 0) this.chilledTimer -= dt;
         if (this.frozenTimer > 0) this.frozenTimer -= dt;
+        if (this.burningTimer > 0) {
+            this.burningTimer -= dt;
+            this.burnTickTimer -= dt;
+
+            if (this.burnTickTimer <= 0) {
+                this.burnTickTimer += 0.5;
+                const game = player.game;
+                const dmg = Math.max(1, Math.round(this.burnDps * 0.5));
+
+                this.hp -= dmg;
+                this.flashTimer = Math.max(this.flashTimer, 0.05);
+                game.floatingText.spawn(this.x, this.y - 30, dmg, false);
+                game.particles.emit({
+                    x: this.x, y: this.y - 20,
+                    count: 3, color: '#fb923c', color2: '#ef4444',
+                    speed: 35, size: 2.5, lifetime: 0.25, glow: true,
+                    gravity: -40
+                });
+
+                if (this.hp <= 0) {
+                    this.hp = 0;
+                    this.dead = true;
+                    this.die(game);
+                    return;
+                }
+            }
+        } else {
+            this.burnDps = 0;
+        }
 
         // Decay knockback
         this.kbX *= 0.85;
@@ -290,6 +354,8 @@ class Enemy extends Ents.Entity {
             
             if (isFlashing) {
                 ctx.filter = 'brightness(200%) drop-shadow(0 0 10px white)';
+            } else if (this.burningTimer > 0) {
+                ctx.filter = 'sepia(1) saturate(2.2) brightness(1.15) drop-shadow(0 0 8px #fb923c)';
             } else if (this.frozenTimer > 0) {
                 ctx.filter = 'hue-rotate(180deg) saturate(1.8) brightness(1.2) drop-shadow(0 0 8px #67e8f9)';
             } else if (this.chilledTimer > 0) {
@@ -304,7 +370,7 @@ class Enemy extends Ents.Entity {
                 -drawWidth / 2, -drawHeight + (radius * 1.55) - bob, drawWidth, drawHeight
             );
             
-            if (isFlashing || this.frozenTimer > 0 || this.chilledTimer > 0) ctx.filter = 'none';
+            if (isFlashing || this.burningTimer > 0 || this.frozenTimer > 0 || this.chilledTimer > 0) ctx.filter = 'none';
 
         } else {
             
@@ -320,6 +386,14 @@ class Enemy extends Ents.Entity {
                 ctx.fillStyle = '#fff';
                 ctx.shadowBlur = 10;
                 ctx.shadowColor = '#fff';
+            } else if (this.burningTimer > 0) {
+                const grd = ctx.createRadialGradient(-radius * 0.3, -radius * 0.3, 0, 0, 0, radius);
+                grd.addColorStop(0, '#fff7ed');
+                grd.addColorStop(0.35, '#fb923c');
+                grd.addColorStop(1, '#7f1d1d');
+                ctx.fillStyle = grd;
+                ctx.shadowBlur = 14;
+                ctx.shadowColor = '#f97316';
             } else if (this.frozenTimer > 0) {
                 ctx.fillStyle = '#e0f2fe';
                 ctx.shadowBlur = 14;
@@ -486,4 +560,3 @@ window.GameEnemies = {
 };
 
 })();
-

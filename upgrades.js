@@ -94,6 +94,22 @@ const PASSIVE_UPGRADES = [
         desc: 'Damage to Frozen/Chilled enemies +25% per level',
         maxLevel: 5,
         apply: (player) => { /* Damage multiplier logic is handled dynamically in Enemy.takeDamage */ }
+    },
+    {
+        id: 'kindling',
+        name: 'Kindling',
+        icon: '🔥',
+        desc: 'Burn damage +25% and burn duration +0.25s',
+        maxLevel: 5,
+        apply: (player) => { /* Flame Burst reads this passive when applying burn */ }
+    },
+    {
+        id: 'wildfire',
+        name: 'Wildfire',
+        icon: '🔥',
+        desc: 'Burning enemies explode and spread fire on death',
+        maxLevel: 3,
+        apply: (player) => { /* Enemy death checks this passive for fire spread */ }
     }
 ];
 
