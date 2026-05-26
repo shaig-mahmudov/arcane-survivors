@@ -533,16 +533,25 @@ class AudioManager {
 class InputManager {
     constructor() {
         this.keys = new Set();
+        this.pressed = new Set();
         this.mouseX = 0;
         this.mouseY = 0;
         this.mouseButtons = new Set();
 
-        const gameKeys = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space']);
+        const gameKeys = new Set([
+            'KeyW', 'KeyA', 'KeyS', 'KeyD',
+            'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+            'Digit1', 'Digit2', 'Digit3', 'Digit4'
+        ]);
         window.addEventListener('keydown', e => {
+            if (!this.keys.has(e.code)) this.pressed.add(e.code);
             this.keys.add(e.code);
             if (gameKeys.has(e.code)) e.preventDefault(); // prevent page scroll on arrow keys / space
         });
-        window.addEventListener('keyup',   e => this.keys.delete(e.code));
+        window.addEventListener('keyup',   e => {
+            this.keys.delete(e.code);
+            this.pressed.delete(e.code);
+        });
         window.addEventListener('mousemove', e => {
             this.mouseX = e.clientX;
             this.mouseY = e.clientY;
@@ -552,6 +561,11 @@ class InputManager {
     }
 
     isDown(code) { return this.keys.has(code); }
+    consume(code) {
+        if (!this.pressed.has(code)) return false;
+        this.pressed.delete(code);
+        return true;
+    }
     isMouseDown(btn = 0) { return this.mouseButtons.has(btn); }
 }
 

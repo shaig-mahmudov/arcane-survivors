@@ -11,6 +11,7 @@ const Ents = window.GameEntities;
 const Weps = window.GameWeapons;
 const Enems = window.GameEnemies;
 const Upgs = window.GameUpgrades;
+const Ults = window.GameUltimates;
 
 // ─── Asset Loader ────────────────────────────────────────────────────────────
 window.ASSETS = {
@@ -59,6 +60,7 @@ class Game {
         this.screenShake = new Utils.ScreenShake();
         this.fpsCounter = new Utils.FPSCounter();
         this.upgradeManager = new Upgs.UpgradeManager(this);
+        this.ultimateManager = new Ults.UltimateManager(this);
         
         this.grid = new Utils.SpatialGrid(30);
         
@@ -109,6 +111,7 @@ class Game {
         this.director = new Enems.Director(this);
         this.particles.particles = [];
         this.floatingText.numbers = [];
+        this.ultimateManager.effects = [];
         this.grid.clear();
         
         this.camera = { x: 0, y: 0 };
@@ -116,13 +119,18 @@ class Game {
         this.lastTime = performance.now();
         
         this.updateHUD();
+        this.triggerUltimateMenu('CHOOSE STARTING ULTI', 'Pick your first ultimate. Press 1-4 to cast owned ultis.');
     }
 
     triggerLevelUpMenu() {
         this.state = 'UPGRADE';
         const screen = document.getElementById('upgrade-screen');
         const container = document.getElementById('cards-container');
+        const title = screen.querySelector('h2');
+        const subtitle = screen.querySelector('p');
         
+        title.innerText = 'LEVEL UP!';
+        subtitle.innerText = 'Choose your upgrade:';
         container.innerHTML = '';
         
         const options = this.upgradeManager.generateOptions(3);
@@ -138,14 +146,59 @@ class Game {
                 opt.apply();
                 this.audio.upgradeSelect();
                 screen.classList.remove('active');
-                this.state = 'PLAYING';
-                this.lastTime = performance.now(); 
-                this.updateHUD();
+                if (this.player.level % 5 === 0 && this.triggerUltimateMenu('NEW ULTI UNLOCKED', 'Choose another ultimate for your arsenal.')) {
+                    return;
+                }
+                this.resumePlay();
             });
             container.appendChild(card);
         });
         
         screen.classList.add('active');
+    }
+
+    triggerUltimateMenu(titleText, subtitleText) {
+        const screen = document.getElementById('upgrade-screen');
+        const container = document.getElementById('cards-container');
+        const title = screen.querySelector('h2');
+        const subtitle = screen.querySelector('p');
+        const options = this.ultimateManager.generateOptions(3);
+
+        if (options.length === 0) {
+            this.resumePlay();
+            return false;
+        }
+
+        this.state = 'UPGRADE';
+        title.innerText = titleText;
+        subtitle.innerText = subtitleText;
+        container.innerHTML = '';
+
+        options.forEach(opt => {
+            const card = document.createElement('div');
+            card.className = 'upgrade-card';
+            card.innerHTML = `
+                <div class="card-icon">${opt.icon}</div>
+                <div class="card-title">${opt.name}</div>
+                <div class="card-desc">${opt.desc}</div>
+            `;
+            card.addEventListener('click', () => {
+                opt.apply();
+                this.audio.upgradeSelect();
+                screen.classList.remove('active');
+                this.resumePlay();
+            });
+            container.appendChild(card);
+        });
+
+        screen.classList.add('active');
+        return true;
+    }
+
+    resumePlay() {
+        this.state = 'PLAYING';
+        this.lastTime = performance.now();
+        this.updateHUD();
     }
 
     triggerGameOver() {
@@ -189,6 +242,7 @@ class Game {
         this.fpsCounter.update(dt);
         
         this.player.update(dt, this.input);
+        this.handleUltimateInput();
         if (this.player.dead && this.state !== 'GAMEOVER') {
             this.triggerGameOver();
         }
@@ -248,6 +302,7 @@ class Game {
         }
         
         this.particles.update(dt);
+        this.ultimateManager.update(dt);
         this.floatingText.update(dt);
         this.screenShake.update(dt);
         
@@ -296,16 +351,31 @@ class Game {
         this.updateInventoryHUD();
     }
 
+    handleUltimateInput() {
+        for (let i = 0; i < 4; i++) {
+            if (this.input.consume(`Digit${i + 1}`)) {
+                if (this.player.castUltimate(i)) {
+                    this.audio.upgradeSelect();
+                    this.updateHUD();
+                }
+                break;
+            }
+        }
+    }
+
     updateInventoryHUD() {
         const passiveLevels = this.player.passives || {};
         const weaponsSignature = this.player.weapons
             .map(w => `${w.constructor.name}:${w.level}`)
             .join('|');
+        const ultimatesSignature = (this.player.ultimates || [])
+            .map(u => `${u.constructor.name}:${u.charges}`)
+            .join('|');
         const passivesSignature = Object.keys(passiveLevels)
             .sort()
             .map(id => `${id}:${passiveLevels[id]}`)
             .join('|');
-        const signature = `${weaponsSignature}::${passivesSignature}`;
+        const signature = `${weaponsSignature}::${passivesSignature}::${ultimatesSignature}`;
 
         if (this.hudCache.inventory === signature) return;
         this.hudCache.inventory = signature;
@@ -340,6 +410,17 @@ class Game {
                 }),
             'No upgrades'
         );
+
+        this.renderInventoryItems(
+            document.getElementById('ui-ultimates'),
+            (this.player.ultimates || []).map((u, index) => ({
+                icon: u.icon,
+                label: `${index + 1}: ${u.name}`,
+                levelLabel: `x${u.charges}`,
+                title: `Press ${index + 1}: ${u.name} (${u.charges} charge${u.charges === 1 ? '' : 's'})`
+            })),
+            'Choose one'
+        );
     }
 
     renderInventoryItems(container, items, emptyText) {
@@ -356,7 +437,7 @@ class Game {
         for (const item of items) {
             const el = document.createElement('div');
             el.className = 'inventory-item';
-            el.title = `${item.label} Lv ${item.level}`;
+            el.title = item.title || `${item.label} Lv ${item.level}`;
 
             const icon = document.createElement('span');
             icon.className = 'inventory-icon';
@@ -364,7 +445,7 @@ class Game {
 
             const level = document.createElement('span');
             level.className = 'inventory-level';
-            level.textContent = `Lv${item.level}`;
+            level.textContent = item.levelLabel || `Lv${item.level}`;
 
             el.append(icon, level);
             container.appendChild(el);
@@ -425,6 +506,7 @@ class Game {
         
         for (const p of this.projectiles) p.draw(ctx);
         
+        this.ultimateManager.draw(ctx);
         this.particles.draw(ctx);
         this.floatingText.draw(ctx);
         

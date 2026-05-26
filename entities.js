@@ -68,6 +68,7 @@ class Player extends Entity {
         this.xpToNext  = this._calcXpThreshold(1);
 
         this.weapons = [];
+        this.ultimates = [];
 
         this.iFrames    = 0;
         this.iFramesDur = 0.8;
@@ -142,6 +143,7 @@ class Player extends Entity {
     _levelUp() {
         this.level++;
         this.xpToNext = this._calcXpThreshold(this.level);
+        this.addUltimateCharge();
 
         this.game.particles.emit({
             x: this.x, y: this.y, count: 24,
@@ -328,6 +330,23 @@ draw(ctx) {
         const existing = this.weapons.find(w => w instanceof WeaponClass);
         if (existing) existing.levelUp();
         else this.weapons.push(new WeaponClass(this.game));
+    }
+
+    addUltimate(UltimateClass) {
+        if (this.ultimates.find(u => u instanceof UltimateClass)) return;
+        this.ultimates.push(new UltimateClass(this.game));
+    }
+
+    addUltimateCharge() {
+        for (const ultimate of this.ultimates) {
+            ultimate.addCharge(1);
+        }
+    }
+
+    castUltimate(index) {
+        const ultimate = this.ultimates[index];
+        if (!ultimate) return false;
+        return ultimate.cast(this);
     }
 }
 
