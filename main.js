@@ -100,6 +100,7 @@ class Game {
     startGame() {
         this.player = new Ents.Player(0, 0, this);
         this.player.addWeapon(Weps.MagicWand);
+        this.hudCache = {};
         
         this.enemies = [];
         this.projectiles = [];
@@ -290,6 +291,83 @@ class Game {
         if (this.hudCache.time !== timeStr) {
             document.getElementById('ui-time').innerText = timeStr;
             this.hudCache.time = timeStr;
+        }
+
+        this.updateInventoryHUD();
+    }
+
+    updateInventoryHUD() {
+        const passiveLevels = this.player.passives || {};
+        const weaponsSignature = this.player.weapons
+            .map(w => `${w.constructor.name}:${w.level}`)
+            .join('|');
+        const passivesSignature = Object.keys(passiveLevels)
+            .sort()
+            .map(id => `${id}:${passiveLevels[id]}`)
+            .join('|');
+        const signature = `${weaponsSignature}::${passivesSignature}`;
+
+        if (this.hudCache.inventory === signature) return;
+        this.hudCache.inventory = signature;
+
+        this.renderInventoryItems(
+            document.getElementById('ui-weapons'),
+            this.player.weapons.map(w => ({
+                icon: w.icon,
+                label: w.name,
+                level: w.level
+            })),
+            'No weapons'
+        );
+
+        const passiveMeta = new Map(Upgs.PASSIVE_UPGRADES.map(p => [p.id, p]));
+        this.renderInventoryItems(
+            document.getElementById('ui-upgrades'),
+            Object.keys(passiveLevels)
+                .filter(id => passiveLevels[id] > 0)
+                .sort((a, b) => {
+                    const nameA = passiveMeta.get(a)?.name || a;
+                    const nameB = passiveMeta.get(b)?.name || b;
+                    return nameA.localeCompare(nameB);
+                })
+                .map(id => {
+                    const meta = passiveMeta.get(id);
+                    return {
+                        icon: meta?.icon || '+',
+                        label: meta?.name || id,
+                        level: passiveLevels[id]
+                    };
+                }),
+            'No upgrades'
+        );
+    }
+
+    renderInventoryItems(container, items, emptyText) {
+        container.innerHTML = '';
+
+        if (items.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'inventory-empty';
+            empty.textContent = emptyText;
+            container.appendChild(empty);
+            return;
+        }
+
+        for (const item of items) {
+            const el = document.createElement('div');
+            el.className = 'inventory-item';
+            el.title = `${item.label} Lv ${item.level}`;
+
+            const icon = document.createElement('span');
+            icon.className = 'inventory-icon';
+            icon.textContent = item.icon;
+
+            const level = document.createElement('span');
+            level.className = 'inventory-level';
+            level.textContent = `Lv${item.level}`;
+
+            el.append(icon, level);
+            container.appendChild(el);
         }
     }
 

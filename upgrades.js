@@ -183,8 +183,8 @@ class UpgradeManager {
 }
 
 window.GameUpgrades = {
+    PASSIVE_UPGRADES,
     UpgradeManager
 };
 
 })();
-
