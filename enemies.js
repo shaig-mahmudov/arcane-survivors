@@ -36,6 +36,11 @@ const ENEMY_DEFS = {
         radius: 35, hp: 800, speed: 50, damage: 40,
         color: '#dc2626', xp: 50, type: 'elite', dropLoot: true,
         frames: 6 // Bosses might have longer animations
+    },
+    arenaBoss: {
+        radius: 62, hp: 3000, speed: 128, damage: 38,
+        color: '#7f1d1d', xp: 0, type: 'elite', isArenaBoss: true,
+        frames: 6
     }
 };
 
@@ -47,7 +52,7 @@ class Enemy extends Ents.Entity {
         this.reset(x, y, def, difficultyMult);
     }
 
-    reset(x, y, def, difficultyMult = 1.0) {
+    reset(x, y, def, difficultyMult = 1.0, scaling = {}) {
         this.x = x;
         this.y = y;
         this.radius = def.radius;
@@ -56,10 +61,14 @@ class Enemy extends Ents.Entity {
         this.dead = false;
 
         this.def = def;
-        this.maxHp = Math.round(def.hp * difficultyMult);
+        const hpScale = scaling.hp || 1;
+        const speedScale = scaling.speed || 1;
+        const damageScale = scaling.damage || 1;
+
+        this.maxHp = Math.round(def.hp * difficultyMult * hpScale);
         this.hp = this.maxHp;
-        this.speed = def.speed * randFloat(0.9, 1.1); // slight speed variation
-        this.damage = Math.round(def.damage * difficultyMult);
+        this.speed = def.speed * speedScale * randFloat(0.9, 1.1); // slight speed variation
+        this.damage = Math.round(def.damage * difficultyMult * damageScale);
         this.color = def.color;
         this.xpValue = def.xp;
 
@@ -86,6 +95,8 @@ class Enemy extends Ents.Entity {
         this.madnessTimer = 0;
         this.madnessDamageMult = 1;
         this.madnessAttackTimer = 0;
+        this.bossDashTimer = randFloat(1.2, 2.0);
+        this.bossTentacleTimer = 0.7;
     }
 
     applyBurn(dps, duration) {
@@ -95,6 +106,7 @@ class Enemy extends Ents.Entity {
     }
 
     applyMadness(duration, damageMult = 1) {
+        if (this.def.isArenaBoss) return;
         if (this.def.type === 'elite') duration *= 0.55;
         this.madnessTimer = Math.max(this.madnessTimer, duration);
         this.madnessDamageMult = Math.max(this.madnessDamageMult, damageMult);
@@ -150,6 +162,11 @@ class Enemy extends Ents.Entity {
     die(game) {
         game.player.kills++;
         game.audio.enemyDeath();
+
+        if (this.def.isArenaBoss) {
+            game.completeBossFight(this);
+            return;
+        }
 
         // Spawn XP gem
         game.gems.push(new Ents.XPGem(this.x, this.y, this.xpValue));
@@ -246,6 +263,11 @@ class Enemy extends Ents.Entity {
 
     update(dt, player) {
         if (this.dead) return;
+
+        if (this.def.isArenaBoss) {
+            this.updateArenaBoss(dt, player);
+            return;
+        }
 
         if (this.flashTimer > 0) this.flashTimer -= dt;
 
@@ -355,9 +377,69 @@ class Enemy extends Ents.Entity {
         }
     }
 
+    updateArenaBoss(dt, player) {
+        if (this.flashTimer > 0) this.flashTimer -= dt;
+        if (this.burningTimer > 0) this.burningTimer -= dt;
+        if (this.chilledTimer > 0) this.chilledTimer -= dt;
+        if (this.frozenTimer > 0) this.frozenTimer -= dt;
+
+        this.bossDashTimer -= dt;
+        this.bossTentacleTimer -= dt;
+        this.kbX *= 0.88;
+        this.kbY *= 0.88;
+
+        const dx = player.x - this.x;
+        const dy = player.y - this.y;
+        const d = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+        let currentSpeed = this.speed;
+        if (this.chilledTimer > 0) currentSpeed *= 0.75;
+        if (this.frozenTimer > 0) currentSpeed *= 0.35;
+
+        if (this.bossDashTimer <= 0) {
+            this.bossDashTimer = randFloat(1.5, 2.3);
+            this.kbX += (dx / d) * 640;
+            this.kbY += (dy / d) * 640;
+            player.game.screenShake.trigger(5, 0.16);
+            player.game.particles.emit({
+                x: this.x, y: this.y - 35,
+                count: 18, color: '#c084fc', color2: '#4c1d95',
+                speed: 120, size: 5, lifetime: 0.35, glow: true
+            });
+        }
+
+        this.x += ((dx / d) * currentSpeed + this.kbX) * dt;
+        this.y += ((dy / d) * currentSpeed + this.kbY) * dt;
+        this.facingAngle = Math.atan2(dy, dx);
+        this.walkTimer += dt * 4;
+
+        const hitRange = this.radius + player.radius + 18;
+        if (d < hitRange) {
+            player.takeDamage(this.damage);
+        }
+
+        if (this.bossTentacleTimer <= 0) {
+            this.bossTentacleTimer = 1.0;
+            const reach = 190;
+            if (d < reach) {
+                player.takeDamage(Math.round(this.damage * 0.75));
+                player.game.screenShake.trigger(3, 0.12);
+            }
+            player.game.particles.emit({
+                x: player.x, y: player.y - 20,
+                count: 8, color: '#7e22ce', color2: '#111827',
+                speed: 90, size: 3, lifetime: 0.28, glow: true
+            });
+        }
+    }
+
     draw(ctx) {
         const { x, y, radius, alpha } = this;
         const isFlashing = this.flashTimer > 0;
+
+        if (this.def.isArenaBoss) {
+            this.drawArenaBoss(ctx, isFlashing);
+            return;
+        }
 
         ctx.save();
         ctx.globalAlpha = alpha;
@@ -502,6 +584,76 @@ class Enemy extends Ents.Entity {
             ctx.fillRect(x - barW / 2, hpBarY, barW * hpPct, barH);
         }
     }
+
+    drawArenaBoss(ctx, isFlashing) {
+        const { x, y, radius } = this;
+        const pulse = Math.sin(this.walkTimer * 2);
+
+        ctx.save();
+        ctx.translate(x, y);
+
+        ctx.beginPath();
+        ctx.ellipse(0, radius * 1.25, radius * 1.25, radius * 0.32, 0, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0,0,0,0.48)';
+        ctx.fill();
+
+        for (let i = 0; i < 8; i++) {
+            const a = this.walkTimer * 0.8 + (i / 8) * Math.PI * 2;
+            const baseX = Math.cos(a) * radius * 0.45;
+            const baseY = Math.sin(a) * radius * 0.25;
+            const tipX = Math.cos(a) * (radius * 1.55 + Math.sin(this.walkTimer * 3 + i) * 18);
+            const tipY = Math.sin(a) * (radius * 0.95 + Math.cos(this.walkTimer * 2 + i) * 16);
+
+            ctx.strokeStyle = i % 2 === 0 ? '#581c87' : '#312e81';
+            ctx.lineWidth = radius * 0.18;
+            ctx.lineCap = 'round';
+            ctx.shadowBlur = 12;
+            ctx.shadowColor = '#a855f7';
+            ctx.beginPath();
+            ctx.moveTo(baseX, baseY);
+            ctx.quadraticCurveTo(tipX * 0.55, tipY * 0.55 - 20, tipX, tipY);
+            ctx.stroke();
+        }
+
+        ctx.shadowBlur = isFlashing ? 22 : 18;
+        ctx.shadowColor = isFlashing ? '#ffffff' : '#c084fc';
+        const body = ctx.createRadialGradient(-radius * 0.25, -radius * 0.35, 0, 0, 0, radius * 1.05);
+        body.addColorStop(0, isFlashing ? '#ffffff' : '#f0abfc');
+        body.addColorStop(0.28, '#7e22ce');
+        body.addColorStop(1, '#111827');
+        ctx.fillStyle = body;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, radius * (0.95 + pulse * 0.03), radius * 0.82, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#fef2f2';
+        ctx.beginPath();
+        ctx.arc(radius * 0.28, -radius * 0.18, radius * 0.12, 0, Math.PI * 2);
+        ctx.arc(-radius * 0.28, -radius * 0.18, radius * 0.12, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.arc(radius * 0.3, -radius * 0.16, radius * 0.055, 0, Math.PI * 2);
+        ctx.arc(-radius * 0.3, -radius * 0.16, radius * 0.055, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = '#e879f9';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(0, radius * 0.12, radius * 0.32, 0.15, Math.PI - 0.15);
+        ctx.stroke();
+
+        ctx.restore();
+
+        if (this.hp < this.maxHp) {
+            const barW = radius * 3.2;
+            const hpPct = this.hp / this.maxHp;
+            ctx.fillStyle = 'rgba(0,0,0,0.7)';
+            ctx.fillRect(x - barW / 2, y - radius * 1.35, barW, 7);
+            ctx.fillStyle = '#dc2626';
+            ctx.fillRect(x - barW / 2, y - radius * 1.35, barW * hpPct, 7);
+        }
+    }
 }
 
 // ─── Director / Wave Spawner ─────────────────────────────────────────────────
@@ -523,11 +675,13 @@ class Director {
         
         this.enemyPool = new window.GameUtils.ObjectPool(
             () => new Enemy(0, 0, ENEMY_DEFS.basic, 1),
-            (e, x, y, def, diffMult) => e.reset(x, y, def, diffMult)
+            (e, x, y, def, diffMult, scaling) => e.reset(x, y, def, diffMult, scaling)
         );
     }
 
     update(dt) {
+        if (this.game.state === 'BOSS') return;
+
         this.timeElapsed += dt;
         this.spawnTimer -= dt;
 
@@ -573,19 +727,26 @@ class Director {
         for (let i = 0; i < amount; i++) {
             const type = randChoice(types);
             const { x, y } = this.getOffscreenPos(player);
-            this.game.enemies.push(this.enemyPool.acquire(x, y, ENEMY_DEFS[type], diffMult));
+            this.game.enemies.push(this.enemyPool.acquire(x, y, ENEMY_DEFS[type], diffMult, this.game.enemyScaling));
         }
     }
 
     spawnElite(diffMult) {
         const player = this.game.player;
         const { x, y } = this.getOffscreenPos(player);
-        this.game.enemies.push(this.enemyPool.acquire(x, y, ENEMY_DEFS.elite, diffMult));
+        this.game.enemies.push(this.enemyPool.acquire(x, y, ENEMY_DEFS.elite, diffMult, this.game.enemyScaling));
         
         // Spawn guards
         for(let i = 0; i < 5; i++) {
-            this.game.enemies.push(this.enemyPool.acquire(x + randFloat(-50, 50), y + randFloat(-50, 50), ENEMY_DEFS.tank, diffMult));
+            this.game.enemies.push(this.enemyPool.acquire(x + randFloat(-50, 50), y + randFloat(-50, 50), ENEMY_DEFS.tank, diffMult, this.game.enemyScaling));
         }
+    }
+
+    spawnArenaBoss(bossLevel) {
+        const boss = this.enemyPool.acquire(0, -260, ENEMY_DEFS.arenaBoss, 1 + bossLevel * 0.35);
+        boss.hp = boss.maxHp;
+        this.game.enemies.push(boss);
+        return boss;
     }
 
     getAvailableTypes() {

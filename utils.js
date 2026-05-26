@@ -431,6 +431,8 @@ class AudioManager {
         this.masterGain = null;
         this.enabled = true;
         this.volume = 0.4;
+        this.themeMusic = null;
+        this.bossMusic = null;
         this._init();
     }
 
@@ -521,6 +523,120 @@ class AudioManager {
     bossSpawn()    {
         this._play({ type:'sawtooth', freq:55, freq2:40, duration:1.2, gain:0.5 });
         this._play({ noise:true, duration:0.5, gain:0.3, filterFreq:200 });
+    }
+    startThemeMusic() {
+        if (!this.enabled || !this.ctx || this.themeMusic) return;
+        try {
+            const now = this.ctx.currentTime;
+            const gain = this.ctx.createGain();
+            gain.gain.setValueAtTime(0.0001, now);
+            gain.gain.exponentialRampToValueAtTime(0.11, now + 0.8);
+            gain.connect(this.masterGain);
+
+            const pad = this.ctx.createOscillator();
+            pad.type = 'triangle';
+            pad.frequency.value = 146.83;
+            pad.connect(gain);
+
+            const harmony = this.ctx.createOscillator();
+            harmony.type = 'sine';
+            harmony.frequency.value = 220;
+            const harmonyGain = this.ctx.createGain();
+            harmonyGain.gain.value = 0.35;
+            harmony.connect(harmonyGain);
+            harmonyGain.connect(gain);
+
+            const arpeggioGain = this.ctx.createGain();
+            arpeggioGain.gain.value = 0.06;
+            arpeggioGain.connect(gain);
+
+            const notes = [293.66, 349.23, 440, 392, 349.23, 293.66, 261.63, 329.63];
+            let step = 0;
+            const playStep = () => {
+                if (!this.themeMusic || !this.ctx) return;
+                const t = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const noteGain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.value = notes[step % notes.length];
+                noteGain.gain.setValueAtTime(0.0001, t);
+                noteGain.gain.exponentialRampToValueAtTime(0.08, t + 0.02);
+                noteGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+                osc.connect(noteGain);
+                noteGain.connect(arpeggioGain);
+                osc.start(t);
+                osc.stop(t + 0.24);
+                step++;
+            };
+
+            pad.start(now);
+            harmony.start(now);
+            const interval = setInterval(playStep, 280);
+            this.themeMusic = { pad, harmony, gain, interval };
+        } catch (e) { /* ignore audio errors */ }
+    }
+    stopThemeMusic() {
+        if (!this.themeMusic || !this.ctx) return;
+        try {
+            const now = this.ctx.currentTime;
+            clearInterval(this.themeMusic.interval);
+            this.themeMusic.gain.gain.cancelScheduledValues(now);
+            this.themeMusic.gain.gain.setValueAtTime(this.themeMusic.gain.gain.value, now);
+            this.themeMusic.gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+            this.themeMusic.pad.stop(now + 0.55);
+            this.themeMusic.harmony.stop(now + 0.55);
+        } catch (e) { /* ignore audio errors */ }
+        this.themeMusic = null;
+    }
+    startBossMusic() {
+        if (!this.enabled || !this.ctx || this.bossMusic) return;
+        this.stopThemeMusic();
+        try {
+            const now = this.ctx.currentTime;
+            const gain = this.ctx.createGain();
+            gain.gain.setValueAtTime(0.0001, now);
+            gain.gain.exponentialRampToValueAtTime(0.16, now + 0.4);
+            gain.connect(this.masterGain);
+
+            const bass = this.ctx.createOscillator();
+            bass.type = 'sawtooth';
+            bass.frequency.value = 55;
+            bass.connect(gain);
+
+            const pulse = this.ctx.createOscillator();
+            pulse.type = 'square';
+            pulse.frequency.value = 110;
+            const pulseGain = this.ctx.createGain();
+            pulseGain.gain.value = 0.035;
+            pulse.connect(pulseGain);
+            pulseGain.connect(gain);
+
+            const lfo = this.ctx.createOscillator();
+            lfo.type = 'square';
+            lfo.frequency.value = 5;
+            const lfoGain = this.ctx.createGain();
+            lfoGain.gain.value = 0.06;
+            lfo.connect(lfoGain);
+            lfoGain.connect(gain.gain);
+
+            bass.start(now);
+            pulse.start(now);
+            lfo.start(now);
+            this.bossMusic = { bass, pulse, lfo, gain };
+        } catch (e) { /* ignore audio errors */ }
+    }
+    stopBossMusic() {
+        if (!this.bossMusic || !this.ctx) return;
+        try {
+            const now = this.ctx.currentTime;
+            this.bossMusic.gain.gain.cancelScheduledValues(now);
+            this.bossMusic.gain.gain.setValueAtTime(this.bossMusic.gain.gain.value, now);
+            this.bossMusic.gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+            this.bossMusic.bass.stop(now + 0.4);
+            this.bossMusic.pulse.stop(now + 0.4);
+            this.bossMusic.lfo.stop(now + 0.4);
+        } catch (e) { /* ignore audio errors */ }
+        this.bossMusic = null;
     }
     upgradeSelect(){ this._play({ type:'sine', freq:800, freq2:1200, duration:0.15, gain:0.2 }); }
 }

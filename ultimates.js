@@ -188,15 +188,16 @@ class FireBallEffect {
         this.radius = radius;
         this.damage = damage;
         this.burnDps = burnDps;
-        this.life = 0.9;
-        this.maxLife = 0.9;
+        this.life = 1.15;
+        this.maxLife = 1.15;
+        this.impactAt = 0.55;
         this.impactDone = false;
     }
 
     update(dt) {
         this.life -= dt;
 
-        if (!this.impactDone && this.life <= 0.48) {
+        if (!this.impactDone && this.life <= this.impactAt) {
             this.impactDone = true;
             this.applyImpact();
         }
@@ -223,7 +224,8 @@ class FireBallEffect {
 
     draw(ctx) {
         const t = 1 - this.life / this.maxLife;
-        const meteorT = clamp(t / 0.48, 0, 1);
+        const impactProgress = (this.maxLife - this.impactAt) / this.maxLife;
+        const meteorT = clamp(t / impactProgress, 0, 1);
         const mx = this.x - 220 + 220 * meteorT;
         const my = this.y - 420 + 400 * meteorT;
 
@@ -248,8 +250,12 @@ class FireBallEffect {
             ctx.arc(mx, my, 24, 0, Math.PI * 2);
             ctx.fill();
         } else {
-            const blastT = clamp((0.48 - this.life) / 0.48, 0, 1);
+            const blastT = clamp((this.impactAt - this.life) / this.impactAt, 0, 1);
             ctx.globalAlpha = 1 - blastT;
+            ctx.fillStyle = `rgba(239,68,68,${0.22 * (1 - blastT)})`;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y - 20, this.radius * blastT, 0, Math.PI * 2);
+            ctx.fill();
             ctx.strokeStyle = '#fb923c';
             ctx.lineWidth = 7 * (1 - blastT);
             ctx.shadowBlur = 20;
@@ -418,7 +424,9 @@ class FireBall extends Ultimate {
     }
 
     activate(player) {
-        const target = this.game.enemies.find(e => !e.dead) || { x: player.x, y: player.y };
+        const target = this.game.enemies
+            .filter(e => !e.dead)
+            .sort((a, b) => distSq(player.x, player.y, a.x, a.y) - distSq(player.x, player.y, b.x, b.y))[0] || { x: player.x, y: player.y };
         const radius = 210 * player.stats.areaBonus;
         const damage = Math.round(115 * player.stats.damage);
         const burnDps = 32 * player.stats.damage;

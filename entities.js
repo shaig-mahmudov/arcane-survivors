@@ -137,6 +137,7 @@ class Player extends Entity {
         while (this.xp >= this.xpToNext) {
             this.xp -= this.xpToNext;
             this._levelUp();
+            if (this.game.state !== 'PLAYING') break;
         }
     }
 
@@ -151,6 +152,10 @@ class Player extends Entity {
             speed: 160, size: 5, lifetime: 0.7, glow: true
         });
         this.game.audio.levelUp();
+        if (this.level % 10 === 0) {
+            this.game.triggerBossFight();
+            return;
+        }
         this.game.triggerLevelUpMenu();
     }
 

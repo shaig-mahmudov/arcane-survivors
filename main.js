@@ -66,6 +66,8 @@ class Game {
         
         this.state = 'MENU'; 
         this.lastTime = 0;
+        this.enemyScaling = { speed: 1, damage: 1, hp: 1 };
+        this.bossFight = null;
 
         this.bgPattern = null;
         window.ASSETS.bg.onload = () => {
@@ -100,6 +102,8 @@ class Game {
     }
 
     startGame() {
+        this.audio.stopBossMusic();
+        this.audio.stopThemeMusic();
         this.player = new Ents.Player(0, 0, this);
         this.player.addWeapon(Weps.MagicWand);
         this.hudCache = {};
@@ -107,6 +111,8 @@ class Game {
         this.enemies = [];
         this.projectiles = [];
         this.gems = [];
+        this.enemyScaling = { speed: 1, damage: 1, hp: 1 };
+        this.bossFight = null;
         
         this.director = new Enems.Director(this);
         this.particles.particles = [];
@@ -117,6 +123,7 @@ class Game {
         this.camera = { x: 0, y: 0 };
         this.state = 'PLAYING';
         this.lastTime = performance.now();
+        this.audio.startThemeMusic();
         
         this.updateHUD();
         this.triggerUltimateMenu('CHOOSE STARTING ULTI', 'Pick your first ultimate. Press 1-4 to cast owned ultis.');
@@ -155,6 +162,77 @@ class Game {
         });
         
         screen.classList.add('active');
+    }
+
+    triggerBossFight() {
+        const bossLevel = Math.floor(this.player.level / 10);
+
+        for (const enemy of this.enemies) {
+            if (!enemy.dead) this.director.enemyPool.release(enemy);
+        }
+        this.enemies = [];
+        this.projectiles = [];
+        this.gems = [];
+        this.particles.particles = [];
+        this.ultimateManager.effects = [];
+        this.floatingText.numbers = [];
+        this.grid.clear();
+
+        this.player.x = 0;
+        this.player.y = 180;
+        this.player._velX = 0;
+        this.player._velY = 0;
+        this.camera.x = 0;
+        this.camera.y = 0;
+
+        const boss = this.director.spawnArenaBoss(bossLevel);
+        this.bossFight = {
+            level: this.player.level,
+            boss,
+            arenaRadius: 520,
+            time: 0
+        };
+
+        this.state = 'BOSS';
+        this.lastTime = performance.now();
+        this.audio.startBossMusic();
+        this.audio.bossSpawn();
+        this.floatingText.spawn(0, 40, `BOSS LEVEL ${this.player.level}`, false, false);
+        this.floatingText.numbers[this.floatingText.numbers.length - 1].scale = 2.8;
+        this.floatingText.numbers[this.floatingText.numbers.length - 1].color = '#f97316';
+        this.updateHUD();
+    }
+
+    completeBossFight(boss) {
+        if (!this.bossFight || this.bossFight.boss !== boss) return;
+
+        this.bossFight = null;
+        this.audio.stopBossMusic();
+        this.audio.startThemeMusic();
+        this.audio.levelUp();
+
+        this.enemyScaling.speed *= 1.10;
+        this.enemyScaling.damage *= 1.10;
+        this.enemyScaling.hp *= 1.20;
+
+        this.player.stats.maxHp += 20;
+        this.player.hp = Math.min(this.player.stats.maxHp, this.player.hp + 60);
+        this.player.stats.damage += 0.08;
+        this.player.stats.attackSpeed *= 1.05;
+        this.player.level += 1;
+        this.player.xp = 0;
+        this.player.xpToNext = this.player._calcXpThreshold(this.player.level);
+        this.player.addUltimateCharge();
+
+        this.enemies = this.enemies.filter(e => e !== boss);
+        this.director.enemyPool.release(boss);
+        this.floatingText.spawn(this.player.x, this.player.y - 80, 'BOSS DEFEATED', false, false);
+        this.floatingText.numbers[this.floatingText.numbers.length - 1].scale = 2.4;
+        this.floatingText.numbers[this.floatingText.numbers.length - 1].color = '#facc15';
+
+        this.state = 'PLAYING';
+        this.lastTime = performance.now();
+        this.updateHUD();
     }
 
     triggerUltimateMenu(titleText, subtitleText) {
@@ -203,6 +281,8 @@ class Game {
 
     triggerGameOver() {
         this.state = 'GAMEOVER';
+        this.audio.stopBossMusic();
+        this.audio.stopThemeMusic();
         const screen = document.getElementById('death-screen');
         const stats = document.getElementById('death-stats');
         
@@ -225,7 +305,7 @@ class Game {
         
         if (dt > 0.1) dt = 0.1;
         
-        if (this.state === 'PLAYING') {
+        if (this.state === 'PLAYING' || this.state === 'BOSS') {
             this.update(dt);
         }
         
@@ -243,6 +323,9 @@ class Game {
         
         this.player.update(dt, this.input);
         this.handleUltimateInput();
+        if (this.state === 'BOSS') {
+            this.updateBossFight(dt);
+        }
         if (this.player.dead && this.state !== 'GAMEOVER') {
             this.triggerGameOver();
         }
@@ -276,8 +359,11 @@ class Game {
             e.update(dt, this.player);
             
             if (e.dead) {
-                this.director.enemyPool.release(e);
-                this.enemies.splice(i, 1);
+                const currentIndex = this.enemies.indexOf(e);
+                if (currentIndex !== -1) {
+                    this.director.enemyPool.release(e);
+                    this.enemies.splice(currentIndex, 1);
+                }
             }
         }
         
@@ -313,7 +399,7 @@ class Game {
     }
     
     updateHUD() {
-        if (this.state !== 'PLAYING') return;
+        if (this.state !== 'PLAYING' && this.state !== 'BOSS') return;
         if (!this.hudCache) this.hudCache = {};
 
         const xpPct = this.player.xpProgress * 100;
@@ -349,6 +435,23 @@ class Game {
         }
 
         this.updateInventoryHUD();
+    }
+
+    updateBossFight(dt) {
+        if (!this.bossFight) return;
+
+        this.bossFight.time += dt;
+        const arenaRadius = this.bossFight.arenaRadius;
+        const px = this.player.x;
+        const py = this.player.y;
+        const pd = Math.sqrt(px * px + py * py);
+
+        if (pd > arenaRadius) {
+            this.player.x = (px / pd) * arenaRadius;
+            this.player.y = (py / pd) * arenaRadius;
+            this.player._velX *= -0.25;
+            this.player._velY *= -0.25;
+        }
     }
 
     handleUltimateInput() {
@@ -497,6 +600,10 @@ class Game {
         }
         ctx.restore();
 
+        if (this.state === 'BOSS' && this.bossFight) {
+            this.drawBossArena(ctx);
+        }
+
         for (const g of this.gems) g.draw(ctx);
         
         this.enemies.sort((a,b) => a.y - b.y);
@@ -510,6 +617,27 @@ class Game {
         this.particles.draw(ctx);
         this.floatingText.draw(ctx);
         
+        ctx.restore();
+    }
+
+    drawBossArena(ctx) {
+        const r = this.bossFight.arenaRadius;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(249, 115, 22, 0.8)';
+        ctx.lineWidth = 6;
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = '#f97316';
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.strokeStyle = 'rgba(250, 204, 21, 0.22)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([18, 14]);
+        ctx.beginPath();
+        ctx.arc(0, 0, r - 22, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
         ctx.restore();
     }
 }
