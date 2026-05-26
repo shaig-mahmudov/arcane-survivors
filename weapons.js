@@ -20,7 +20,7 @@ class Projectile extends window.GameEntities.Entity {
     constructor({ x, y, vx, vy, radius = 7, damage, isCrit = false,
                   color = '#a78bfa', glowColor = '#7c3aed',
                   piercing = 0, lifetime = 2,
-                  onHit = null, trail = true }) {
+                  onHit = null, trail = true, drawYOffset = 0 }) {
         super(x, y, radius);
         this.vx = vx;
         this.vy = vy;
@@ -33,6 +33,7 @@ class Projectile extends window.GameEntities.Entity {
         this.lifetime  = lifetime;
         this.onHit     = onHit;      // optional callback(enemy)
         this.trail     = trail;
+        this.drawYOffset = drawYOffset;
         this.hitSet    = new Set();  // enemies already hit by this projectile
         this._trailPoints = [];
     }
@@ -43,6 +44,11 @@ class Projectile extends window.GameEntities.Entity {
         this.lifetime -= dt;
         if (this.lifetime <= 0) this.dead = true;
 
+        // Smoothly glide MagicWand projectiles from staff tip (-55) to enemy chest (-20)
+        if (this.drawYOffset < 0) {
+            this.drawYOffset = lerp(this.drawYOffset, -20, Math.min(1, 6 * dt));
+        }
+
         // Record trail
         if (this.trail) {
             this._trailPoints.push({ x: this.x, y: this.y });
@@ -51,7 +57,8 @@ class Projectile extends window.GameEntities.Entity {
     }
 
     draw(ctx) {
-        const { x, y, radius, color, glowColor } = this;
+        const { x, radius, color, glowColor } = this;
+        const y = this.y + this.drawYOffset;
 
         // Trail
         if (this.trail && this._trailPoints.length > 1) {
@@ -61,8 +68,8 @@ class Projectile extends window.GameEntities.Entity {
                 const p0 = this._trailPoints[i - 1];
                 const p1 = this._trailPoints[i];
                 ctx.beginPath();
-                ctx.moveTo(p0.x, p0.y);
-                ctx.lineTo(p1.x, p1.y);
+                ctx.moveTo(p0.x, p0.y + this.drawYOffset);
+                ctx.lineTo(p1.x, p1.y + this.drawYOffset);
                 ctx.strokeStyle = `rgba(${this.colorRgbStr},${t * 0.6})`;
                 ctx.lineWidth = radius * t * 1.4;
                 ctx.lineCap = 'round';
@@ -135,7 +142,6 @@ class Weapon {
         this._timer += dt * player.stats.attackSpeed;
         while (this._timer >= this.cooldown) {
             this._timer -= this.cooldown;
-            player.attackTimer = 0.4; 
             this.fire(player);
         }
     }
@@ -196,7 +202,10 @@ class MagicWand extends Weapon {
     get _projectileCount() { return 1 + Math.floor((this.level - 1) / 2); }
     get _piercing() { return Math.floor((this.level - 1) / 3); }
 
-fire(player) {
+    fire(player) {
+        // Trigger attack animation specifically for MagicWand
+        player.attackTimer = 0.4;
+
         const target = this._nearestEnemy(player.x, player.y, 700);
         const speed  = 320 * player.stats.projectileSpd;
 
@@ -211,19 +220,19 @@ fire(player) {
         const count = this._projectileCount;
         const spreadAngle = count > 1 ? (count - 1) * 0.18 : 0;
 
-        // 2. EXACT HAND/STAFF POSITION
-        // player.y is the feet. Subtracting 55 moves the spawn point up to the chest/hands.
-        // We also add Math.cos and Math.sin to push the spawn point forward to the tip of the staff!
-        const staffTipX = player.x + Math.cos(baseAngle) * 35;
-        const staffTipY = player.y - 55 + Math.sin(baseAngle) * 35;
+        // 2. EXACT HAND/STAFF POSITION (ON GROUND PLANE FOR PERFECT COLLISION)
+        // player.y is the feet. We calculate the spawn position on the ground gameplay plane,
+        // and pass a drawYOffset of -55 to render it at the chest/staff tip height.
+        const groundTipX = player.x + Math.cos(baseAngle) * 35;
+        const groundTipY = player.y + Math.sin(baseAngle) * 35;
 
         for (let i = 0; i < count; i++) {
             const angle = baseAngle + (i - (count - 1) / 2) * (spreadAngle / Math.max(1, count - 1));
             const { dmg, isCrit } = player.calcDamage(this._baseDamage);
 
             this._spawnProjectile({
-                x: staffTipX, // <--- Spawns at the X of the staff tip
-                y: staffTipY, // <--- Spawns at the Y of the staff tip
+                x: groundTipX, // <--- Spawns at the X of the staff tip on the ground plane
+                y: groundTipY, // <--- Spawns at the Y of the staff tip on the ground plane
                 vx: Math.cos(angle) * speed,
                 vy: Math.sin(angle) * speed,
                 radius: 7 + (this.level > 4 ? 2 : 0),
@@ -233,13 +242,14 @@ fire(player) {
                 glowColor: '#7c3aed',
                 piercing: this._piercing,
                 lifetime: 1.6,
+                drawYOffset: -55, // <--- Visual render height offset
                 onHit: (enemy, g) => {
                     g.particles.emit({
-                        x: enemy.x, y: enemy.y,
+                        x: enemy.x, y: enemy.y - 20, // Center on enemy's visual body
                         count: 5, color: '#c084fc', color2: '#7c3aed',
                         speed: 70, size: 3, lifetime: 0.3, glow: true
                     });
-                    g.floatingText.spawn(enemy.x, enemy.y, dmg, isCrit);
+                    g.floatingText.spawn(enemy.x, enemy.y - 30, dmg, isCrit); // Spawn above enemy's visual body
                 }
             });
         }
@@ -301,9 +311,9 @@ class OrbitWeapon extends Weapon {
 
                 const { dmg, isCrit } = player.calcDamage(this._baseDamage);
                 enemy.takeDamage(dmg, isCrit, this.game);
-                this.game.floatingText.spawn(enemy.x, enemy.y, dmg, isCrit);
+                this.game.floatingText.spawn(enemy.x, enemy.y - 30, dmg, isCrit);
                 this.game.particles.emit({
-                    x: enemy.x, y: enemy.y,
+                    x: enemy.x, y: enemy.y - 20,
                     count: 4, color: '#f59e0b', color2: '#ef4444',
                     speed: 60, size: 3, lifetime: 0.25, glow: true
                 });
@@ -395,7 +405,7 @@ class AreaExplosion extends Weapon {
             for (const enemy of hit) {
                 const { dmg, isCrit } = player.calcDamage(this._baseDamage);
                 enemy.takeDamage(dmg, isCrit, this.game);
-                this.game.floatingText.spawn(enemy.x, enemy.y, dmg, isCrit);
+                this.game.floatingText.spawn(enemy.x, enemy.y - 30, dmg, isCrit);
             }
 
             // Particles
@@ -500,11 +510,11 @@ class KnifeThrow extends Weapon {
                 trail: false,
                 onHit: (enemy, g) => {
                     g.particles.emit({
-                        x: enemy.x, y: enemy.y,
+                        x: enemy.x, y: enemy.y - 15, // center on knife hit
                         count: 3, color: '#ef4444', color2: '#94a3b8',
                         speed: 50, size: 2, lifetime: 0.2
                     });
-                    g.floatingText.spawn(enemy.x, enemy.y, dmg, isCrit);
+                    g.floatingText.spawn(enemy.x, enemy.y - 30, dmg, isCrit);
                 }
             });
         }
@@ -557,11 +567,11 @@ class LightningStrike extends Weapon {
                 this._baseDamage * Math.pow(0.75, c) // damage falls off per chain
             );
             current.takeDamage(dmg, isCrit, this.game);
-            this.game.floatingText.spawn(current.x, current.y, dmg, isCrit);
+            this.game.floatingText.spawn(current.x, current.y - 30, dmg, isCrit);
 
             // Particles at strike point
             this.game.particles.emit({
-                x: current.x, y: current.y,
+                x: current.x, y: current.y - 20,
                 count: 10, color: '#fde047', color2: '#38bdf8',
                 speed: 100, size: 4, lifetime: 0.35, glow: true
             });

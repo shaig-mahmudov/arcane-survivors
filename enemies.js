@@ -166,16 +166,16 @@ class Enemy extends Ents.Entity {
         }
     }
 
-draw(ctx) {
+    draw(ctx) {
         const { x, y, radius, alpha } = this;
         const isFlashing = this.flashTimer > 0;
 
         ctx.save();
         ctx.globalAlpha = alpha;
 
-        // Shadow under the enemy
+        // Shadow under the enemy (centered exactly under the visual feet)
         ctx.beginPath();
-        ctx.ellipse(x, y + radius, radius * 0.8, radius * 0.25, 0, 0, Math.PI * 2);
+        ctx.ellipse(x, y + radius * 1.55, radius * 0.8, radius * 0.25, 0, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(0,0,0,0.4)';
         ctx.fill();
 
@@ -187,8 +187,10 @@ draw(ctx) {
         }
 
         const img = window.ASSETS ? window.ASSETS[this.def.type] : null;
+        let hasImage = img && img.complete && img.naturalWidth > 0;
+        let drawHeight = radius * 4.5; // default height fallback
 
-if (img && img.complete && img.naturalWidth > 0) {
+        if (hasImage) {
             
             // ─── ANIMATED SPRITESHEET RENDERING ──────────────────────────────
             
@@ -205,7 +207,7 @@ if (img && img.complete && img.naturalWidth > 0) {
             
             // ─── FIX: Aspect Ratio and Size Scaling ───
             const scaleMultiplier = 4.5; // Increase this to make enemies bigger
-            const drawHeight = radius * scaleMultiplier;
+            drawHeight = radius * scaleMultiplier;
             const drawWidth = drawHeight * (frameWidth / frameHeight); // Maintain aspect ratio
             
             const bob = Math.abs(Math.sin(this.walkTimer)) * (radius * 0.15); 
@@ -214,11 +216,12 @@ if (img && img.complete && img.naturalWidth > 0) {
                 ctx.filter = 'brightness(200%) drop-shadow(0 0 10px white)';
             }
             
-            // Anchor at feet and apply bobbing to the height
+            // Anchor at feet (with 1.55 * radius offset) and apply bobbing to the height
+            // This aligns the actual collision center (y) perfectly with the visual center/body of the enemy!
             ctx.drawImage(
                 img, 
                 sourceX, 0, frameWidth, frameHeight, 
-                -drawWidth / 2, -drawHeight + (radius * 0.8) - bob, drawWidth, drawHeight
+                -drawWidth / 2, -drawHeight + (radius * 1.55) - bob, drawWidth, drawHeight
             );
             
             if (isFlashing) ctx.filter = 'none';
@@ -261,15 +264,19 @@ if (img && img.complete && img.naturalWidth > 0) {
 
         ctx.restore();
 
-        // HP Bar
+        // HP Bar (dynamically positioned above visual head)
         if (this.hp < this.maxHp) {
             const barW = radius * 2;
             const barH = 3;
             const hpPct = this.hp / this.maxHp;
+            const hpBarY = hasImage 
+                ? y - drawHeight + (radius * 1.55) - 12
+                : y - radius - 12;
+
             ctx.fillStyle = 'rgba(0,0,0,0.6)';
-            ctx.fillRect(x - barW / 2, y - radius - 12, barW, barH);
+            ctx.fillRect(x - barW / 2, hpBarY, barW, barH);
             ctx.fillStyle = this.def.type === 'elite' ? '#ef4444' : '#22c55e';
-            ctx.fillRect(x - barW / 2, y - radius - 12, barW * hpPct, barH);
+            ctx.fillRect(x - barW / 2, hpBarY, barW * hpPct, barH);
         }
     }
 }
