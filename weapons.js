@@ -876,10 +876,92 @@ class FlameBurst extends Weapon {
     }
 }
 
+// Madness weapon: curses enemies so they attack each other for a short time.
+class MadnessHex extends Weapon {
+    constructor(game) {
+        super(game, 'Madness Hex', 'M');
+        this.maxLevel = 8;
+        this._rings = [];
+    }
+
+    get cooldown() { return Math.max(1.2, 4.0 - (this.level - 1) * 0.25); }
+    get _radius() { return 180 + (this.level - 1) * 18; }
+    get _duration() { return 2.4 + Math.floor((this.level - 1) / 2) * 0.45; }
+    get _targetCount() { return 3 + Math.floor((this.level - 1) / 2); }
+    get _enemyDamageMult() { return 1 + (this.level - 1) * 0.08; }
+
+    fire(player) {
+        const enemies = this.game.enemies.filter(e => !e.dead);
+        if (enemies.length === 0) return;
+
+        const anchor = this._nearestEnemy(player.x, player.y, 700) || randChoice(enemies);
+        const hysteria = player.passives?.hysteria || 0;
+        const radius = this._radius * player.stats.areaBonus * (1 + hysteria * 0.08);
+        const duration = this._duration + hysteria * 0.35;
+        const targetCount = this._targetCount + Math.floor(hysteria / 2);
+        const enemyDamageMult = this._enemyDamageMult + hysteria * 0.12;
+        const candidates = this._enemiesInRadius(anchor.x, anchor.y, radius)
+            .sort((a, b) => distSq(anchor.x, anchor.y, a.x, a.y) - distSq(anchor.x, anchor.y, b.x, b.y))
+            .slice(0, targetCount);
+
+        for (const enemy of candidates) {
+            enemy.applyMadness(duration, enemyDamageMult);
+            this.game.particles.emit({
+                x: enemy.x, y: enemy.y - 24,
+                count: 8, color: '#f0abfc', color2: '#7c3aed',
+                speed: 60, size: 3, lifetime: 0.4, glow: true
+            });
+        }
+
+        this._rings.push({
+            x: anchor.x,
+            y: anchor.y,
+            radius,
+            life: 0.45,
+            maxLife: 0.45
+        });
+        this.game.screenShake.trigger(2, 0.1);
+        this.game.audio.lightning();
+    }
+
+    update(dt, player) {
+        super.update(dt, player);
+
+        for (let i = this._rings.length - 1; i >= 0; i--) {
+            this._rings[i].life -= dt;
+            if (this._rings[i].life <= 0) this._rings.splice(i, 1);
+        }
+    }
+
+    draw(ctx) {
+        for (const ring of this._rings) {
+            const t = 1 - ring.life / ring.maxLife;
+            const r = ring.radius * (0.25 + t * 0.75);
+            const alpha = 1 - t;
+
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.strokeStyle = '#c084fc';
+            ctx.lineWidth = 4 * alpha;
+            ctx.shadowBlur = 18;
+            ctx.shadowColor = '#a855f7';
+            ctx.beginPath();
+            ctx.arc(ring.x, ring.y, r, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+
+    getLevelDesc() {
+        if (this.level === 1) return 'Curses enemies, forcing them to attack each other.';
+        return `Lv${this.level} - ${this._targetCount} enemies, ${this._duration.toFixed(1)}s madness`;
+    }
+}
+
 // ─── Weapon Registry ─────────────────────────────────────────────────────────
 
 /** All available weapon classes, used by the upgrade system. */
-const WEAPON_CLASSES = [MagicWand, OrbitWeapon, AreaExplosion, KnifeThrow, LightningStrike, FrostNova, FlameBurst];
+const WEAPON_CLASSES = [MagicWand, OrbitWeapon, AreaExplosion, KnifeThrow, LightningStrike, FrostNova, FlameBurst, MadnessHex];
 
 const WEAPON_DESCRIPTIONS = {
     MagicWand:      'Fires homing magic bolts at nearest enemies.',
@@ -889,6 +971,7 @@ const WEAPON_DESCRIPTIONS = {
     LightningStrike:'Calls chain lightning that jumps between foes.',
     FrostNova:      'Emits expanding ice waves that freeze and shatter foes.',
     FlameBurst:     'Launches exploding fireballs that ignite enemies.',
+    MadnessHex:     'Curses enemies, forcing them to attack each other.',
 };
 
 // ─── Exports ─────────────────────────────────────────────────────────────────
@@ -903,6 +986,7 @@ window.GameWeapons = {
     LightningStrike,
     FrostNova,
     FlameBurst,
+    MadnessHex,
     WEAPON_CLASSES,
     WEAPON_DESCRIPTIONS,
 };

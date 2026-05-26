@@ -83,12 +83,38 @@ class Enemy extends Ents.Entity {
         this.burningTimer = 0;
         this.burnDps = 0;
         this.burnTickTimer = 0;
+        this.madnessTimer = 0;
+        this.madnessDamageMult = 1;
+        this.madnessAttackTimer = 0;
     }
 
     applyBurn(dps, duration) {
         this.burningTimer = Math.max(this.burningTimer, duration);
         this.burnDps = Math.max(this.burnDps, dps);
         if (this.burnTickTimer <= 0) this.burnTickTimer = 0.5;
+    }
+
+    applyMadness(duration, damageMult = 1) {
+        if (this.def.type === 'elite') duration *= 0.55;
+        this.madnessTimer = Math.max(this.madnessTimer, duration);
+        this.madnessDamageMult = Math.max(this.madnessDamageMult, damageMult);
+    }
+
+    findMadnessTarget(game, radius = 280) {
+        let best = null;
+        let bestD = radius * radius;
+        const candidates = game.grid.query(this.x, this.y, radius);
+
+        for (const enemy of candidates) {
+            if (enemy === this || enemy.dead) continue;
+            const d = distSq(this.x, this.y, enemy.x, enemy.y);
+            if (d < bestD) {
+                bestD = d;
+                best = enemy;
+            }
+        }
+
+        return best;
     }
 
     takeDamage(amount, isCrit, game) {
@@ -226,6 +252,8 @@ class Enemy extends Ents.Entity {
         // Decay status effects
         if (this.chilledTimer > 0) this.chilledTimer -= dt;
         if (this.frozenTimer > 0) this.frozenTimer -= dt;
+        if (this.madnessTimer > 0) this.madnessTimer -= dt;
+        if (this.madnessAttackTimer > 0) this.madnessAttackTimer -= dt;
         if (this.burningTimer > 0) {
             this.burningTimer -= dt;
             this.burnTickTimer -= dt;
@@ -260,9 +288,14 @@ class Enemy extends Ents.Entity {
         this.kbX *= 0.85;
         this.kbY *= 0.85;
 
-        // Base movement toward player
-        let dx = player.x - this.x;
-        let dy = player.y - this.y;
+        const game = player.game;
+        const isMaddened = this.madnessTimer > 0;
+        const madnessTarget = isMaddened ? this.findMadnessTarget(game) : null;
+        const target = madnessTarget || player;
+
+        // Base movement toward target
+        let dx = target.x - this.x;
+        let dy = target.y - this.y;
         let d = Math.sqrt(dx * dx + dy * dy);
 
         let vx = 0, vy = 0;
@@ -273,6 +306,9 @@ class Enemy extends Ents.Entity {
                 currentSpeed = 0; // Frozen solid
             } else if (this.chilledTimer > 0) {
                 currentSpeed *= 0.6; // 40% slow
+            }
+            if (isMaddened) {
+                currentSpeed *= madnessTarget ? 1.1 : 0.4;
             }
 
             vx = (dx / d) * currentSpeed;
@@ -300,8 +336,21 @@ class Enemy extends Ents.Entity {
         this.x += (vx + this.kbX * kbMult) * dt;
         this.y += (vy + this.kbY * kbMult) * dt;
 
+        if (madnessTarget && d < this.radius + madnessTarget.radius + 3 && this.madnessAttackTimer <= 0) {
+            const game = player.game;
+            const dmg = Math.max(1, Math.round(this.damage * 0.75 * this.madnessDamageMult));
+            this.madnessAttackTimer = 0.8;
+            madnessTarget.takeDamage(dmg, false, game);
+            game.floatingText.spawn(madnessTarget.x, madnessTarget.y - 30, dmg, false);
+            game.particles.emit({
+                x: madnessTarget.x, y: madnessTarget.y - 20,
+                count: 5, color: '#c084fc', color2: '#4c1d95',
+                speed: 55, size: 3, lifetime: 0.25, glow: true
+            });
+        }
+
         // Check collision with player
-        if (d < this.radius + player.radius) {
+        if (!isMaddened && d < this.radius + player.radius) {
             player.takeDamage(this.damage);
         }
     }
@@ -354,6 +403,8 @@ class Enemy extends Ents.Entity {
             
             if (isFlashing) {
                 ctx.filter = 'brightness(200%) drop-shadow(0 0 10px white)';
+            } else if (this.madnessTimer > 0) {
+                ctx.filter = 'hue-rotate(250deg) saturate(2) brightness(1.2) drop-shadow(0 0 8px #c084fc)';
             } else if (this.burningTimer > 0) {
                 ctx.filter = 'sepia(1) saturate(2.2) brightness(1.15) drop-shadow(0 0 8px #fb923c)';
             } else if (this.frozenTimer > 0) {
@@ -370,7 +421,7 @@ class Enemy extends Ents.Entity {
                 -drawWidth / 2, -drawHeight + (radius * 1.55) - bob, drawWidth, drawHeight
             );
             
-            if (isFlashing || this.burningTimer > 0 || this.frozenTimer > 0 || this.chilledTimer > 0) ctx.filter = 'none';
+            if (isFlashing || this.madnessTimer > 0 || this.burningTimer > 0 || this.frozenTimer > 0 || this.chilledTimer > 0) ctx.filter = 'none';
 
         } else {
             
@@ -386,6 +437,14 @@ class Enemy extends Ents.Entity {
                 ctx.fillStyle = '#fff';
                 ctx.shadowBlur = 10;
                 ctx.shadowColor = '#fff';
+            } else if (this.madnessTimer > 0) {
+                const grd = ctx.createRadialGradient(-radius * 0.3, -radius * 0.3, 0, 0, 0, radius);
+                grd.addColorStop(0, '#f5d0fe');
+                grd.addColorStop(0.35, '#c084fc');
+                grd.addColorStop(1, '#312e81');
+                ctx.fillStyle = grd;
+                ctx.shadowBlur = 14;
+                ctx.shadowColor = '#c084fc';
             } else if (this.burningTimer > 0) {
                 const grd = ctx.createRadialGradient(-radius * 0.3, -radius * 0.3, 0, 0, 0, radius);
                 grd.addColorStop(0, '#fff7ed');

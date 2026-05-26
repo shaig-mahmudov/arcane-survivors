@@ -110,6 +110,14 @@ const PASSIVE_UPGRADES = [
         desc: 'Burning enemies explode and spread fire on death',
         maxLevel: 3,
         apply: (player) => { /* Enemy death checks this passive for fire spread */ }
+    },
+    {
+        id: 'hysteria',
+        name: 'Hysteria',
+        icon: 'M',
+        desc: 'Madness lasts longer, reaches farther, and causes more enemy damage',
+        maxLevel: 5,
+        apply: (player) => { /* Madness Hex reads this passive when applying madness */ }
     }
 ];
 
